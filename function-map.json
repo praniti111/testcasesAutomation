@@ -1,0 +1,514 @@
+[
+  {
+    "type": "function",
+    "name": "sendToChatScoreAgent",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/chat-score-agent.ts",
+    "startLine": 10,
+    "endLine": 44,
+    "content": "async function sendToChatScoreAgent(url, input) {\r\n  try {\r\n    Logger.info(\r\n      `sendToChatScoreAgent REST CALL initiation: URL: -- ${url} INPUT: -- ${JSON.stringify(input)}`\r\n    );\r\n    const { brand, ...payload } = input;\r\n\r\n    // Langfuse Credentials for Review Toolkit\r\n    const langfusePublicKey = process.env.LANGFUSE_PK;\r\n    const langfuseSecretKey = process.env.LANGFUSE_SK;\r\n\r\n    const response = await axios({\r\n      method: 'post',\r\n      url: url,\r\n      headers: {\r\n        'Content-Type': 'application/json',\r\n        Authorization: `Basic ${btoa(langfusePublicKey + ':' + langfuseSecretKey)}`\r\n      },\r\n      data: payload\r\n    });\r\n    Logger.info(`sendToChatScoreAgent RESPONSE: -- response: -- ${response}`);\r\n    return response.data;\r\n  } catch (error) {\r\n    const customError = createCustomError(\r\n      error,\r\n      'sendToChatScoreAgent',\r\n      `sendToChatScoreAgent ERROR: -- ${error.message} FOR URL: -- ${url} INPUT: -- ${JSON.stringify(input)}`,\r\n      ERROR_CODE?.P2_ERROR_UPDATING_CHAT_SCORE?.errorCode,\r\n      ERROR_CODE?.P2_ERROR_UPDATING_CHAT_SCORE?.statusCode\r\n    );\r\n    // Handle any errors that occur during the HTTP request\r\n    Logger.error(errorSerializer(customError));\r\n  }\r\n  return null;\r\n}"
+  },
+  {
+    "type": "class-method",
+    "class": "DocumentStore",
+    "name": "connect",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/document-store.ts",
+    "startLine": 22,
+    "endLine": 39,
+    "content": "async connect(): Promise<mongoose.Mongoose> {\r\n    this.uri = `${this.host}/${this.dbName}`;\r\n    try {\r\n      this.database = await mongoose.connect(this.uri);\r\n      Logger.info('Database connection successful');\r\n      return this.database;\r\n    } catch (error) {\r\n      const customError = createCustomError(\r\n        error,\r\n        'DatabaseConnection',\r\n        ERROR_CODE?.P1_DATABASE_CONNECTION_ERROR?.errorMessage,\r\n        ERROR_CODE?.P1_DATABASE_CONNECTION_ERROR?.errorCode,\r\n        ERROR_CODE?.P1_DATABASE_CONNECTION_ERROR?.statusCode\r\n      );\r\n      Logger.error(errorSerializer(customError));\r\n      throw new Error('Failed to connect to the database');\r\n    }\r\n  }"
+  },
+  {
+    "type": "function",
+    "name": "sendQueryToFlowise",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/flowise.ts",
+    "startLine": 13,
+    "endLine": 101,
+    "content": "async function sendQueryToFlowise(url, query, sessionID, brand) {\r\n  try {\r\n    // Check if the brand is valid\r\n    const startTime = Date.now();\r\n    if (!validBrands.includes(brand)) {\r\n      const errorObject = new Error(`Invalid brand: ${brand}. Must be one of: ${validBrands.join(', ')}`);\r\n      const customError = createCustomError(\r\n        errorObject,\r\n        'sendQueryToFlowise',\r\n        `Invalid brand: ${brand}. Must be one of: ${validBrands.join(', ')}`,\r\n        ERROR_CODE?.P3_INVALID_BRAND?.errorCode,\r\n        ERROR_CODE?.P3_INVALID_BRAND?.statusCode\r\n      );\r\n      Logger.error(errorSerializer(customError));\r\n      return {\r\n        error: `Invalid brand: ${brand}. Must be one of: ${validBrands.join(', ')}`\r\n      };\r\n    }\r\n\r\n    // read the brand appropriate system message prompt\r\n    let flowiseOverrideObject = {};\r\n    try {\r\n      const { getOverrides } = await import(`../config/overrides/${brand}`);\r\n      flowiseOverrideObject = await getOverrides(brand);\r\n    } catch (error) {\r\n      const customError = createCustomError(\r\n        error,\r\n        'flowiseOverrideObject',\r\n        `Error importing configuration for brand: ${brand}`,\r\n        ERROR_CODE?.P1_ERROR_CONFIGURING_BRAND?.errorCode,\r\n        ERROR_CODE?.P1_ERROR_CONFIGURING_BRAND?.statusCode\r\n      );\r\n\r\n      Logger.error(errorSerializer(customError));\r\n      return { error: `Error importing configuration for brand: ${brand}` };\r\n    }\r\n\r\n    const flowiseData = {\r\n      question: query,\r\n      overrideConfig: {\r\n        sessionId: sessionID,\r\n        vars: {\r\n          brand: brand\r\n        },\r\n        analytics: {\r\n          langFuse: {\r\n            userId: `query-flow-${brand}`\r\n          }\r\n        }\r\n      }\r\n    };\r\n\r\n    flowiseData.overrideConfig = {\r\n      ...flowiseData.overrideConfig,\r\n      ...flowiseOverrideObject\r\n    };\r\n    Logger.info(\r\n      `sendQueryToFlowise for brand ${brand}: ${url}  \\n${JSON.stringify(\r\n        flowiseData\r\n      )}`\r\n    );\r\n\r\n    const response = await fetch(url, {\r\n      method: 'POST',\r\n      headers: {\r\n        'Content-Type': 'application/json'\r\n      },\r\n      body: JSON.stringify(flowiseData)\r\n    });\r\n    const endTime = Date.now();\r\n    const executionTime = endTime - startTime;\r\n    Logger.info(`Execution time for sendQueryToFlowise: ${executionTime}ms`);\r\n    const result = await response.json();\r\n    Logger.info(`Response data:${JSON.stringify(result)}`);\r\n    return result;\r\n  }\r\n  catch (error) {\r\n    const customError = createCustomError(\r\n      error,\r\n      'sendQueryToFlowise',\r\n      `Error in retrieving response from flowise`,\r\n      ERROR_CODE?.P1_ERROR_RETRIEVING_CHAT_MESSAGE?.errorCode,\r\n      ERROR_CODE?.P1_ERROR_RETRIEVING_CHAT_MESSAGE?.statusCode\r\n    );\r\n\r\n    Logger.error(errorSerializer(customError));\r\n    throw error;\r\n  }\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "starterQuestionsQuery",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/flowise.ts",
+    "startLine": 103,
+    "endLine": 124,
+    "content": "async function starterQuestionsQuery(url, input, brand) {\r\n  const startTime = Date.now();\r\n  const response = await axios({\r\n    method: 'post',\r\n    url: url,\r\n    headers: {\r\n      'Content-Type': 'application/json'\r\n    },\r\n    data: {\r\n      question: input,\r\n      overrideConfig: {\r\n        vars: {\r\n          brand: brand\r\n        }\r\n      }\r\n    }\r\n  });\r\n  const endTime = Date.now();\r\n  const executionTime = endTime - startTime;\r\n  Logger.info(`Execution time for starterQuestionsQuery: ${executionTime}ms`);\r\n  return response.data;\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "suggestionPromptsQuery",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/flowise.ts",
+    "startLine": 126,
+    "endLine": 152,
+    "content": "async function suggestionPromptsQuery(url, input, brand) {\r\n  const startTime = Date.now();\r\n  const response = await axios({\r\n    method: 'post',\r\n    url: url,\r\n    headers: {\r\n      'Content-Type': 'application/json'\r\n    },\r\n    data: {\r\n      question: input,\r\n      overrideConfig: {\r\n        vars: {\r\n          brand: brand\r\n        }\r\n      }\r\n    }\r\n  });\r\n  const endTime = Date.now();\r\n  const executionTime = endTime - startTime;\r\n  Logger.info(`Execution time for suggestionPromptsQuery: ${executionTime}ms`);\r\n  const final = {\r\n    json: response?.data.text\r\n      ? JSON.parse(response?.data.text)\r\n      : response?.data.json\r\n  };\r\n  return final;\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "nextBestCtaQuery",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/flowise.ts",
+    "startLine": 154,
+    "endLine": 176,
+    "content": "async function nextBestCtaQuery(url, input, brand) {\r\n  const startTime = Date.now();\r\n  const response = await axios({\r\n    method: 'post',\r\n    url: url,\r\n    headers: {\r\n      'Content-Type': 'application/json'\r\n    },\r\n    data: {\r\n      question: input,\r\n      overrideConfig: {\r\n        vars: {\r\n          brand: brand\r\n        }\r\n      }\r\n    },\r\n    timeout: 20000 // Set the timeout value in milliseconds\r\n  });\r\n  const endTime = Date.now();\r\n  const executionTime = endTime - startTime;\r\n  Logger.info(`Execution time for nextBestCtaQuery: ${executionTime}ms`);\r\n  return response.data;\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "restoreSummarizationQuery",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/flowise.ts",
+    "startLine": 178,
+    "endLine": 201,
+    "content": "async function restoreSummarizationQuery(url, input, brand) {\r\n  const startTime = Date.now();\r\n  const response = await axios({\r\n    method: 'post',\r\n    url: url,\r\n    headers: {\r\n      'Content-Type': 'application/json'\r\n    },\r\n    data: {\r\n      question: input,\r\n      overrideConfig: {\r\n        vars: {\r\n          brand: brand\r\n        }\r\n      }\r\n    }\r\n  });\r\n  const endTime = Date.now();\r\n  const executionTime = endTime - startTime;\r\n  Logger.info(\r\n    `Execution time for restoreSummarizationQuery: ${executionTime}ms`\r\n  );\r\n  return response.data;\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "summarizeChatHistoryQuery",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/flowise.ts",
+    "startLine": 203,
+    "endLine": 240,
+    "content": "async function summarizeChatHistoryQuery(url, input, brand) {\r\n  const startTime = Date.now();\r\n  try {\r\n    const response = await axios({\r\n      method: 'post',\r\n      url: url,\r\n      headers: {\r\n        'Content-Type': 'application/json'\r\n      },\r\n      data: {\r\n        question: input,\r\n        overrideConfig: {\r\n          vars: {\r\n            brand: brand\r\n          }\r\n        }\r\n      }\r\n    });\r\n    const endTime = Date.now();\r\n    const executionTime = endTime - startTime;\r\n    Logger.info(\r\n      `Execution time for summarizeChatHistoryQuery: ${executionTime}ms`\r\n    );\r\n    return response.data;\r\n  } catch (error) {\r\n    const customError = createCustomError(\r\n      error,\r\n      'summarizeChatHistoryQuery',\r\n      `Error in summarizeChatHistoryQuery: ${error.message}`,\r\n      ERROR_CODE?.P2_ERROR_CHAT_HISTORY_SUMMARY?.errorCode,\r\n      ERROR_CODE?.P2_ERROR_CHAT_HISTORY_SUMMARY?.statusCode);\r\n\r\n    Logger.error(errorSerializer(customError));\r\n\r\n    const summarizeAnswer = { json: { answer: input } };\r\n    return summarizeAnswer;\r\n  }\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "analyzeQueryResponse",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/flowise.ts",
+    "startLine": 242,
+    "endLine": 264,
+    "content": "async function analyzeQueryResponse(url, input, brand) {\r\n  const startTime = Date.now();\r\n  const response = await axios({\r\n    method: 'post',\r\n    url: url,\r\n    headers: {\r\n      'Content-Type': 'application/json'\r\n    },\r\n    data: {\r\n      question: input,\r\n      overrideConfig: {\r\n        vars: {\r\n          brand: brand\r\n        }\r\n      }\r\n    },\r\n    timeout: 5000 // Set the timeout value in milliseconds\r\n  });\r\n  const endTime = Date.now();\r\n  const executionTime = endTime - startTime;\r\n  Logger.info(`Execution time for analyzeQueryResponse: ${executionTime}ms`);\r\n  return response.data;\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "extractEntitiesFromChatHistory",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/flowise.ts",
+    "startLine": 266,
+    "endLine": 302,
+    "content": "async function extractEntitiesFromChatHistory(url, chatHistory, brand) {\r\n  const startTime = Date.now();\r\n  try {\r\n    const response = await axios({\r\n      method: 'post',\r\n      url: url,\r\n      headers: {\r\n        'Content-Type': 'application/json'\r\n      },\r\n      data: {\r\n        question: chatHistory,\r\n        overrideConfig: {\r\n          vars: {\r\n            brand: brand\r\n          }\r\n        }\r\n      },\r\n      timeout: 5000 // Set the timeout value in milliseconds\r\n    });\r\n    const endTime = Date.now();\r\n    const executionTime = endTime - startTime;\r\n    Logger.info(\r\n      `Execution time for extractEntitiesFromChatHistory: ${executionTime}ms`\r\n    );\r\n    return response.data;\r\n  } catch (error) {\r\n    const customError = createCustomError(\r\n      error,\r\n      'extractEntitiesFromChatHistory',\r\n      `Error in extractEntitiesFromChatHistory: ${error}`,\r\n      ERROR_CODE?.P1_ERROR_EXTARCT_ENTITIES?.errorCode,\r\n      ERROR_CODE?.P1_ERROR_EXTARCT_ENTITIES?.statusCode);\r\n\r\n    Logger.error(errorSerializer(customError));\r\n    return {};\r\n  }\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "sendQueryToGuardrails",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/guardrails.ts",
+    "startLine": 4,
+    "endLine": 25,
+    "content": "async function sendQueryToGuardrails(url, input, username, password) {\r\n  const startTime = Date.now();\r\n  // Encode username and password to Base64\r\n  const authHeader =\r\n    'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');\r\n\r\n  const response = await axios({\r\n    method: 'post',\r\n    url: url,\r\n    headers: {\r\n      'Content-Type': 'application/json',\r\n      Authorization: authHeader // Add the Authorization header\r\n    },\r\n    data: {\r\n      input_query: input\r\n    }\r\n  });\r\n  const endTime = Date.now();\r\n  const executionTime = endTime - startTime;\r\n  Logger.info(`Execution time for sendQueryToGuardrails: ${executionTime}ms`);\r\n  return response.data;\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "main",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/index.ts",
+    "startLine": 23,
+    "endLine": 31,
+    "content": "async function main() {\r\n  // Get the latest CMS data and cache it\r\n  await fetchAndCacheAllCollections();\r\n\r\n  // Initialize the server\r\n  server.initializeMiddlewares();\r\n  server.initializeRoutes();\r\n  server.start();\r\n}"
+  },
+  {
+    "type": "class-method",
+    "class": "OpenSearchStore",
+    "name": "createCollection",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/opensearch-store.ts",
+    "startLine": 15,
+    "endLine": 17,
+    "content": "async createCollection(): Promise<void> {\r\n    Logger.info('OpenSearchStore: This functionality is not yet implemented.');\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "OpenSearchStore",
+    "name": "insert",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/opensearch-store.ts",
+    "startLine": 24,
+    "endLine": 26,
+    "content": "async insert(embeddings: number[][], texts: string[]): Promise<void> {\r\n    Logger.info('OpenSearchStore: This functionality is not yet implemented.');\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "QdrantStore",
+    "name": "createCollection",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/qdrant-store.ts",
+    "startLine": 24,
+    "endLine": 37,
+    "content": "async createCollection(): Promise<void> {\r\n    try {\r\n      await this.client.deleteCollection(this.collectionName);\r\n    } catch (error) {\r\n\r\n      const customError = createCustomError(error, 'CreateCollection', ERROR_CODE?.P1_FAILED_DELETE_COLLECTION?.errorMessage, ERROR_CODE?.P1_FAILED_DELETE_COLLECTION?.errorCode, ERROR_CODE?.P1_FAILED_DELETE_COLLECTION?.statusCode);\r\n\r\n      Logger.error(errorSerializer(customError));\r\n    }\r\n\r\n    await this.client.createCollection(this.collectionName, {\r\n      vectors: { size: 1536, distance: 'Cosine' } // Adjust size if needed\r\n    });\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "QdrantStore",
+    "name": "insert",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/qdrant-store.ts",
+    "startLine": 39,
+    "endLine": 55,
+    "content": "async insert(embeddings: number[][], texts: string[]): Promise<void> {\r\n    try {\r\n      const points = embeddings.map((vector, index) => ({\r\n        id: index,\r\n        vector,\r\n        payload: { text: texts[index] }\r\n      }));\r\n      await this.client.upsert(this.collectionName, {\r\n        points\r\n      });\r\n    } catch (error) {\r\n\r\n      const customError = createCustomError(error, 'InsertCollection', ERROR_CODE?.P1_FAILED_INSERT_COLLECTION?.errorMessage, ERROR_CODE?.P1_FAILED_INSERT_COLLECTION?.errorCode, ERROR_CODE?.P1_FAILED_INSERT_COLLECTION?.statusCode);\r\n\r\n      Logger.error(errorSerializer(customError));\r\n    }\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "Server",
+    "name": "initializeMiddlewares",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/server.ts",
+    "startLine": 58,
+    "endLine": 65,
+    "content": "initializeMiddlewares() {\r\n    this.app.use(cors());\r\n    // Trust the first proxy\r\n    this.app.set('trust proxy', true);\r\n    this.app.use(bodyParser.json());\r\n    // Add origin based configId assignment middleware here\r\n    this.app.use(this.setConfig.bind(this));\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "Server",
+    "name": "initializeRoutes",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/server.ts",
+    "startLine": 70,
+    "endLine": 75,
+    "content": "initializeRoutes() {\r\n    // Add the routes to the express app\r\n    Routes.forEach(route => {\r\n      this.app[route.method.toLowerCase()](route.path, route.handler);\r\n    });\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "Server",
+    "name": "start",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/server.ts",
+    "startLine": 80,
+    "endLine": 84,
+    "content": "start() {\r\n    this.app.listen(this.port, () => {\r\n      Logger.info(`Server running on port ${this.port}`);\r\n    });\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "Server",
+    "name": "setConfig",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/server.ts",
+    "startLine": 92,
+    "endLine": 119,
+    "content": "setConfig(req, res, next) {\r\n    try {\r\n      const clientIp = req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || req.connection.remoteAddress;\r\n      const clientPort = req.headers['x-forwarded-port'] || req.connection.remotePort;\r\n      Logger.info(`Request coming from Client IP: ${clientIp}, Port: ${clientPort}`);\r\n      const origin = req.headers.origin || '';\r\n\r\n      if (origin && origin in this.originMapping) {\r\n        // Assign the configId and proceed to the next middleware\r\n        const configId = this.originMapping[origin];\r\n        Logger.info(\r\n          `Request is from origin: ${origin}, using config id: ${configId}`\r\n        );\r\n        // Pass the configId to the next middleware\r\n        req.configId = configId;\r\n        next();\r\n      } else {\r\n        // Origin is invalid, return 401 Unauthorized\r\n        Logger.info('Mandatory header - origin is either missing or invalid');\r\n        res.sendStatus(401);\r\n      }\r\n    } catch (err) {\r\n\r\n      const customError = createCustomError(err, 'setConfig', ERROR_CODE?.P1_CONFIGURATION_ERROR?.errorMessage, ERROR_CODE?.P1_CONFIGURATION_ERROR?.errorCode, ERROR_CODE?.P1_CONFIGURATION_ERROR?.statusCode);\r\n      Logger.error(errorSerializer(customError));\r\n      res.sendStatus(401);\r\n    }\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "ServiceStatus",
+    "name": "getStatus",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/service-status.ts",
+    "startLine": 14,
+    "endLine": 16,
+    "content": "getStatus() {\r\n    return this.status;\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "ServiceStatus",
+    "name": "setStatus",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/service-status.ts",
+    "startLine": 18,
+    "endLine": 20,
+    "content": "setStatus(status) {\r\n    this.status = status;\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "DynamoUser",
+    "name": "init",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/user/dynamo-index.ts",
+    "startLine": 23,
+    "endLine": 25,
+    "content": "public async init(): Promise<void> {\r\n    this.userModel = dynamoose.model('Users', userDynamooseSchema);\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "DynamoUser",
+    "name": "createNewSessionObject",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/user/dynamo-index.ts",
+    "startLine": 28,
+    "endLine": 33,
+    "content": "public async createNewSessionObject(overrideSessionObject) {\r\n    const sessionschema = dynamoose.model(\"Users\", sessionSchema)\r\n    const sessionObject = new sessionschema({ sessionID: uuid4(), createdTimestamp: Date.now(), lastActiveTimestamp: Date.now(), userLoggedIn: overrideSessionObject.userLoggedIn, summarizedChatRestoreMessage: overrideSessionObject.summarizedChatRestoreMessage });\r\n    const sessionNew = await sessionObject.withDefaults();\r\n    return sessionNew;\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "DynamoUser",
+    "name": "getExistingUserObject",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/user/dynamo-index.ts",
+    "startLine": 35,
+    "endLine": 40,
+    "content": "public async getExistingUserObject(clientID) {\r\n    if (!this.userModel) {\r\n      throw new Error(\"DynamoUser is not initialized. Call getInstance() first.\");\r\n    }\r\n    return await this.userModel.get({ clientID });\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "DynamoUser",
+    "name": "createNewUserAndReturnSession",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/user/dynamo-index.ts",
+    "startLine": 42,
+    "endLine": 55,
+    "content": "public async createNewUserAndReturnSession(clientID) {\r\n    // const newUserEntry = await this.userModel.create({ clientID });\r\n    const newUserEntry = await this.userModel.create({ clientID });\r\n\r\n    if (!newUserEntry.sessions || newUserEntry.sessions.length === 0) {\r\n      Logger.info(`No sessions found for clientID: ${clientID}`);\r\n      return {};\r\n    }\r\n\r\n    const session = newUserEntry.sessions[newUserEntry.sessions.length - 1];\r\n\r\n    Logger.info(`Session created: ${JSON.stringify(session)}`);\r\n    return session;\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "DynamoUser",
+    "name": "updateUserObject",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/user/dynamo-index.ts",
+    "startLine": 58,
+    "endLine": 70,
+    "content": "public async updateUserObject(clientID, userUUID, sessionID, chatHistory): Promise<typeof chatHistorySchema | Error> {\r\n    const existingUserObject = await this.getExistingUserObject(clientID);\r\n    if (!existingUserObject) {\r\n      throw new Error(\"User object not found\");\r\n    }\r\n    const updatedSessions = existingUserObject.sessions.map((s) =>\r\n      s.sessionID === sessionID\r\n        ? { ...s, chatHistory: [...s.chatHistory, ...chatHistory] }\r\n        : s\r\n    );\r\n    await this.updateUserObjectInStore(clientID, { sessions: updatedSessions });\r\n    return updatedSessions.find((s) => s.sessionID === sessionID)?.chatHistory || [];\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "DynamoUser",
+    "name": "updateUserObjectInStore",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/user/dynamo-index.ts",
+    "startLine": 72,
+    "endLine": 74,
+    "content": "public async updateUserObjectInStore(clientID, userObject) {\r\n    return await this.userModel.update({ clientID }, { $SET: { sessions: userObject.sessions, context: userObject.context } });\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "DynamoUser",
+    "name": "validateUserObject",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/user/dynamo-index.ts",
+    "startLine": 76,
+    "endLine": 78,
+    "content": "public validateUserObject(userObject) {\r\n    return userObject; // No schema validation applied\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "DynamoUser",
+    "name": "addChatInsight",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/user/dynamo-index.ts",
+    "startLine": 81,
+    "endLine": 106,
+    "content": "async addChatInsight(sessionID, chatInsight, clientID) {\r\n    try {\r\n      const user = await this.getExistingUserObject(clientID);\r\n      if (!user) {\r\n        Logger.warn(`No user found for clientID: ${clientID}`);\r\n        return false;\r\n      }\r\n      if (!user.context || user.context.length === 0) {\r\n        Logger.warn(`No context found for clientID: ${clientID}`);\r\n        return false;\r\n      }\r\n      const newChatInsight = Array.isArray(chatInsight) ? chatInsight : [chatInsight];\r\n      const updatedContext = {\r\n        ...user.context,\r\n        chatInsight: [...newChatInsight, ...(user.context.chatInsight || [])]\r\n      };\r\n      await this.userModel.update({ clientID }, { $SET: { context: { ...updatedContext } } });\r\n      Logger.info(`Chat insight updated for sessionID: ${sessionID}`);\r\n      return true;\r\n    } catch (error) {\r\n      const customError = createCustomError(error, 'addChatInsight', `Error adding chat insight: ${error.message}`, ERROR_CODE?.P2_ERROR_ADDING_CHAT_INSIGHT?.errorCode, ERROR_CODE?.P2_ERROR_ADDING_CHAT_INSIGHT?.statusCode);\r\n\r\n      Logger.error(errorSerializer(customError));\r\n      throw error;\r\n    }\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "DynamoUser",
+    "name": "getChatInsight",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/user/dynamo-index.ts",
+    "startLine": 108,
+    "endLine": 132,
+    "content": "async getChatInsight(clientID) {\r\n    try {\r\n      const user = await this.getExistingUserObject(clientID);\r\n      if (!user) {\r\n        Logger.warn(`No user found for clientID: ${clientID}`);\r\n        return null;\r\n      }\r\n      if (!user.context || user.context.length === 0) {\r\n        Logger.warn(`No context found for clientID: ${clientID}`);\r\n        return null;\r\n      }\r\n      const insights = user.context;\r\n      if (insights) {\r\n        return insights?.chatInsight;\r\n      } else {\r\n        Logger.warn(`No chat insight found for clientID: ${clientID}`);\r\n        return null;\r\n      }\r\n    } catch (error) {\r\n      const customError = createCustomError(error, 'addChatInsight', `Error fetching chat insight: ${error.message}`, ERROR_CODE?.P2_ERROR_FETCHING_CHAT_INSIGHT?.errorCode, ERROR_CODE?.P2_ERROR_FETCHING_CHAT_INSIGHT?.statusCode);\r\n\r\n      Logger.error(errorSerializer(customError));\r\n      throw error;\r\n    }\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "DynamoUser",
+    "name": "getTopestChatInsight",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/user/dynamo-index.ts",
+    "startLine": 134,
+    "endLine": 158,
+    "content": "async getTopestChatInsight(sessionID, clientID) {\r\n    try {\r\n      const user = await this.getExistingUserObject(clientID);\r\n      if (!user) {\r\n        Logger.warn(`No user found for clientID: ${clientID}`);\r\n        return null;\r\n      }\r\n      if (!user.context || user.context.length === 0) {\r\n        Logger.warn(`No context found for clientID: ${clientID}`);\r\n        return null;\r\n      }\r\n      const insights = user.context;\r\n      if (insights) {\r\n        return insights?.chatInsight[0];\r\n      } else {\r\n        Logger.warn(`No chat insight found for clientID: ${clientID}`);\r\n        return null;\r\n      }\r\n    } catch (error) {\r\n      const customError = createCustomError(error, 'addChatInsight', `Error fetching chat insight: ${error.message}`, ERROR_CODE?.P2_ERROR_FETCHING_CHAT_INSIGHT?.errorCode, ERROR_CODE?.P2_ERROR_FETCHING_CHAT_INSIGHT?.statusCode);\r\n\r\n      Logger.error(errorSerializer(customError));\r\n      throw error;\r\n    }\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "User",
+    "name": "init",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/user/index.ts",
+    "startLine": 26,
+    "endLine": 33,
+    "content": "public async init(): Promise<void> {\r\n    const database = await this.documentStore.connect();\r\n    this.userModel = database.model('users', userMongooseSchema); // Create a Mongoose model from the schema\r\n    // const testUser = new this.userModel(\r\n    //   userSchema.parse({ clientID: '75560956080851297421449302223692129713' })\r\n    // );\r\n    // await testUser.save();\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "User",
+    "name": "updateUserObject",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/user/index.ts",
+    "startLine": 45,
+    "endLine": 72,
+    "content": "public async updateUserObject(\r\n    clientID,\r\n    userUUID,\r\n    sessionID,\r\n    chatHistory\r\n  ): Promise<z.infer<typeof chatHistorySchema> | Error> {\r\n    const existingUserObject = await this.getExistingUserObject(\r\n      clientID,\r\n      userUUID\r\n    );\r\n    if (!existingUserObject) {\r\n      throw new Error('User object not found');\r\n    }\r\n    const updatedSessions = existingUserObject.sessions.map(s =>\r\n      s.sessionID === sessionID\r\n        ? { ...s, chatHistory: s.chatHistory.concat(chatHistory) }\r\n        : s\r\n    );\r\n    const fullChatHistory = updatedSessions.find(\r\n      s => s.sessionID === sessionID\r\n    ).chatHistory;\r\n    const updatedUserObject = {\r\n      ...existingUserObject,\r\n      sessions: updatedSessions\r\n    };\r\n    await this.updateUserObjectInStore(clientID, updatedUserObject);\r\n    return fullChatHistory;\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "User",
+    "name": "updateUserObjectInStore",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/user/index.ts",
+    "startLine": 74,
+    "endLine": 78,
+    "content": "public async updateUserObjectInStore(clientID, userObject) {\r\n    return userSchema.parse(\r\n      await this.userModel.findOneAndUpdate({ clientID }, userObject)?.lean()\r\n    );\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "User",
+    "name": "createNewSessionObject",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/user/index.ts",
+    "startLine": 80,
+    "endLine": 82,
+    "content": "public createNewSessionObject(overrideSessionObject = {}) {\r\n    return sessionSchema.parse(overrideSessionObject);\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "User",
+    "name": "createNewUserObject",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/user/index.ts",
+    "startLine": 84,
+    "endLine": 86,
+    "content": "public createNewUserObject(clientID) {\r\n    return userSchema.parse({ clientID });\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "User",
+    "name": "getExistingUserObject",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/user/index.ts",
+    "startLine": 88,
+    "endLine": 93,
+    "content": "public async getExistingUserObject(clientID, userUUID) {\r\n    const existingUserObject = await this.userModel\r\n      .findOne({ clientID })\r\n      ?.lean();\r\n    return existingUserObject;\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "User",
+    "name": "createNewUserAndReturnSession",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/user/index.ts",
+    "startLine": 95,
+    "endLine": 110,
+    "content": "public async createNewUserAndReturnSession(clientID) {\r\n    const initialUserData = userSchema.parse({\r\n      clientID,\r\n      context: {\r\n        chatInsight: [],\r\n      }\r\n    });\r\n    const newUserEntry = new this.userModel(userSchema.parse({ clientID }));\r\n    await newUserEntry.save();\r\n    // make sure the session object adheres to the schema\r\n    const session = sessionSchema.parse(\r\n      newUserEntry.sessions[newUserEntry.sessions.length - 1]\r\n    );\r\n    Logger.info(`session created: ${JSON.stringify(session)}`);\r\n    return session;\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "User",
+    "name": "addChatInsight",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/user/index.ts",
+    "startLine": 112,
+    "endLine": 147,
+    "content": "async addChatInsight(sessionID, chatInsight, clientID, userUUID) {\r\n    try {\r\n      const existingUser = await this.getExistingUserObject(clientID, userUUID);\r\n      if (!existingUser) {\r\n        Logger.warn(`No user found for clientID: ${clientID}`);\r\n        return false;\r\n      }\r\n\r\n      const prevInsights = Array.isArray(existingUser.context?.chatInsight)\r\n        ? existingUser.context.chatInsight\r\n        : [];\r\n\r\n      const updatedContext = {\r\n        ...existingUser.context,\r\n        chatInsight: [chatInsight, ...prevInsights],\r\n      };\r\n\r\n      await this.userModel.updateOne(\r\n        { clientID },\r\n        { $set: { context: updatedContext } }\r\n      );\r\n\r\n      Logger.info(`Chat insight updated for clientID: ${clientID}`);\r\n      return true;\r\n    } catch (error) {\r\n      const customError = createCustomError(\r\n        error,\r\n        'addChatInsight',\r\n        `Error adding chat insight: ${error.message}`,\r\n        ERROR_CODE?.P2_ERROR_ADDING_CHAT_INSIGHT?.errorCode,\r\n        ERROR_CODE?.P2_ERROR_ADDING_CHAT_INSIGHT?.statusCode\r\n      );\r\n      Logger.error(errorSerializer(customError));\r\n      throw error;\r\n    }\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "User",
+    "name": "getChatInsight",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/user/index.ts",
+    "startLine": 150,
+    "endLine": 170,
+    "content": "async getChatInsight(clientID, userUUID) {\r\n    try {\r\n      const user = await this.getExistingUserObject(clientID, userUUID);\r\n      if (!user?.context) {\r\n        Logger.warn(`No context found for clientID: ${clientID}`);\r\n        return null;\r\n      }\r\n\r\n      return user.context.chatInsight || null;\r\n    } catch (error) {\r\n      const customError = createCustomError(\r\n        error,\r\n        'getChatInsight',\r\n        `Error fetching chat insight: ${error.message}`,\r\n        ERROR_CODE?.P2_ERROR_FETCHING_CHAT_INSIGHT?.errorCode,\r\n        ERROR_CODE?.P2_ERROR_FETCHING_CHAT_INSIGHT?.statusCode\r\n      );\r\n      Logger.error(errorSerializer(customError));\r\n      throw error;\r\n    }\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "User",
+    "name": "getTopestChatInsight",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/user/index.ts",
+    "startLine": 172,
+    "endLine": 198,
+    "content": "public async getTopestChatInsight(sessionID, clientID) {\r\n    try {\r\n      const user = await this.getExistingUserObject(clientID);\r\n\r\n      if (!user) {\r\n        Logger.warn(`No user found for clientID: ${clientID}`);\r\n        return null;\r\n      }\r\n\r\n      if (!user.context || !Array.isArray(user.context.chatInsight) || user.context.chatInsight.length === 0) {\r\n        Logger.warn(`No chatInsight found for clientID: ${clientID}`);\r\n        return null;\r\n      }\r\n\r\n      return user.context.chatInsight[0];\r\n    } catch (error) {\r\n      const customError = createCustomError(\r\n        error,\r\n        'getTopmostChatInsight',\r\n        `Error fetching topmost chat insight: ${error.message}`,\r\n        ERROR_CODE?.P2_ERROR_FETCHING_CHAT_INSIGHT?.errorCode,\r\n        ERROR_CODE?.P2_ERROR_FETCHING_CHAT_INSIGHT?.statusCode\r\n      );\r\n      Logger.error(errorSerializer(customError));\r\n      throw error;\r\n    }\r\n  }"
+  },
+  {
+    "type": "class-method",
+    "class": "User",
+    "name": "validateUserObject",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/user/index.ts",
+    "startLine": 209,
+    "endLine": 211,
+    "content": "public validateUserObject(userObject) {\r\n    return userSchema.parse(userObject);\r\n  }"
+  },
+  {
+    "type": "function",
+    "name": "getDatabaseInstance",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/route-handlers/chat/index.ts",
+    "startLine": 30,
+    "endLine": 39,
+    "content": "async function getDatabaseInstance(): Promise<User | DynamoUser> {\r\n  switch (process.env.DATABASE_TYPE) {\r\n    case \"DYNAMODB\":\r\n      return await DynamoUser.instance;\r\n    case \"MONGODB\":\r\n      return await User.instance;\r\n    default:\r\n      throw new Error(`Unsupported DATABASE_TYPE: ${process.env.DATABASE_TYPE}`);\r\n  }\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "initialize",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/route-handlers/chat/index.ts",
+    "startLine": 42,
+    "endLine": 45,
+    "content": "async function initialize() {\r\n  userObject = await getDatabaseInstance();\r\n  serviceStatus = new ServiceStatus();\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "isNumericString",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/route-handlers/chat/index.ts",
+    "startLine": 55,
+    "endLine": 58,
+    "content": "function isNumericString(str) {\r\n  const numericRegex = /^\\d+$/;\r\n  return numericRegex.test(str);\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "isValidUUID",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/route-handlers/chat/index.ts",
+    "startLine": 61,
+    "endLine": 65,
+    "content": "function isValidUUID(uuid) {\r\n  const uuidRegex =\r\n    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\r\n  return uuidRegex.test(uuid);\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "validateInput",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/route-handlers/chat/index.ts",
+    "startLine": 67,
+    "endLine": 77,
+    "content": "function validateInput(sessionID, clientID) {\r\n  if (!isValidUUID(sessionID) || !isNumericString(clientID)) {\r\n    const errorObject = new Error(\"Invalid session id or client id \");\r\n\r\n    const customError = createCustomError(errorObject, 'validateInput', `Invalid sessionID or clientID detected: sessionID=${sessionID}, clientID=${clientID}`, ERROR_CODE?.P2_INVALID_SESSION_ID_CLIENTID?.errorCode, ERROR_CODE?.P2_INVALID_SESSION_ID_CLIENTID?.statusCode);\r\n\r\n    Logger.error(errorSerializer(customError));\r\n    return false;\r\n  }\r\n  return true;\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "processFlowiseQuery",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/route-handlers/chat/index.ts",
+    "startLine": 110,
+    "endLine": 152,
+    "content": "async function processFlowiseQuery(\r\n  flowiseConfig,\r\n  query,\r\n  sessionID,\r\n  brand,\r\n  res\r\n) {\r\n  try {\r\n    const result = await sendQueryToFlowise(\r\n      flowiseConfig.flowiseHost + flowiseConfig.chat,\r\n      query,\r\n      sessionID,\r\n      brand\r\n    );\r\n    if (result.error) {\r\n\r\n      const customError = createCustomError(result.error, 'processFlowiseQuery', `Error in chat message: ${result.error}`, ERROR_CODE?.P1_ERROR_CHAT_MESSAGE?.errorCode, ERROR_CODE?.P1_ERROR_CHAT_MESSAGE?.statusCode);\r\n\r\n      Logger.error(errorSerializer(customError));\r\n      res.status(200).json({\r\n        response: {\r\n          text: result.error,\r\n          serviceStatus: serviceStatus.getStatus()\r\n        }\r\n      });\r\n      return null;\r\n    }\r\n    return result;\r\n  } catch (error) {\r\n\r\n    const customError = createCustomError(error,\r\n      'processFlowiseQuery',\r\n      `Error while retrieving chat message: ${JSON.stringify(error.response?.data || error)}`,\r\n      ERROR_CODE?.P1_ERROR_RETRIEVING_CHAT_MESSAGE?.errorCode,\r\n      ERROR_CODE?.P1_ERROR_RETRIEVING_CHAT_MESSAGE?.statusCode\r\n    );\r\n    Logger.error(errorSerializer(customError));\r\n    res.status(500).json({\r\n      text: 'I am sorry, I can\\'t respond to this. Please try again later.',\r\n    });\r\n    return null;\r\n  }\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "generateSuggestions",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/route-handlers/chat/index.ts",
+    "startLine": 193,
+    "endLine": 223,
+    "content": "async function generateSuggestions(flowiseConfig, input, brand) {\r\n  let suggestions = [];\r\n  try {\r\n    if (input) {\r\n      const suggestionsObject = (\r\n        await suggestionPromptsQuery(\r\n          flowiseConfig.flowiseHost + flowiseConfig.suggestionPrompts,\r\n          input,\r\n          brand\r\n        )\r\n      )?.json;\r\n      const suggestionsEntries = Object.fromEntries(\r\n        Object.entries(suggestionsObject).map(([key, value]) => [\r\n          key,\r\n          (value as string).replace(/['\"]+/g, '')\r\n        ])\r\n      );\r\n      suggestions = Object.values(suggestionsEntries);\r\n    }\r\n  } catch (error) {\r\n\r\n    const customError = createCustomError(error,\r\n      'generateSuggestions',\r\n      `Error in generating suggestion: ${error}`,\r\n      ERROR_CODE?.P2_ERROR_SUGGESTION_FLOW?.errorCode,\r\n      ERROR_CODE?.P2_ERROR_SUGGESTION_FLOW?.statusCode\r\n    );\r\n    Logger.error(errorSerializer(customError));\r\n  }\r\n  return suggestions;\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "updateUserSessionAndObject",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/route-handlers/chat/index.ts",
+    "startLine": 226,
+    "endLine": 268,
+    "content": "async function updateUserSessionAndObject(\r\n  {\r\n    clientID,\r\n    userUUID,\r\n    sessionID,\r\n    sessionObject = {},\r\n    context = {}\r\n  },\r\n  res\r\n) {\r\n  const existingUserObject = await userObject.getExistingUserObject(\r\n    clientID,\r\n    userUUID\r\n  );\r\n  if (!existingUserObject) {\r\n    const errorObject = new Error(\"User object not found, please reinitialize the session\");\r\n\r\n    const customError = createCustomError(errorObject, 'updateUserSessionAndObject', `User object not found, please reinitialize the session`, ERROR_CODE?.P2_INVALID_SESSION_ID_CLIENTID?.errorCode, ERROR_CODE?.P2_INVALID_SESSION_ID_CLIENTID?.statusCode);\r\n\r\n    Logger.error(errorSerializer(customError));\r\n\r\n    res.status(400).json({\r\n      error: 'User object not found, please reinitialize the session'\r\n    });\r\n    return false;\r\n  }\r\n  const updatedSessions = existingUserObject.sessions.map(s =>\r\n    s.sessionID === sessionID\r\n      ? {\r\n        ...s,\r\n        ...sessionObject\r\n      }\r\n      : s\r\n  );\r\n  const updatedUserObject = {\r\n    ...existingUserObject,\r\n    sessions: updatedSessions,\r\n    context: { ...existingUserObject.context, ...context }\r\n  };\r\n  const parsedUserObject = userObject.validateUserObject(updatedUserObject);\r\n  await userObject.updateUserObjectInStore(clientID, parsedUserObject);\r\n  return true;\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "updateUserSessionChatHistory",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/route-handlers/chat/index.ts",
+    "startLine": 270,
+    "endLine": 315,
+    "content": "async function updateUserSessionChatHistory(\r\n  {\r\n    clientID,\r\n    userUUID,\r\n    sessionID,\r\n    chatHistory,\r\n    sessionObject = {},\r\n  },\r\n  res\r\n) {\r\n  const existingUserObject = await userObject.getExistingUserObject(\r\n    clientID,\r\n    userUUID\r\n  );\r\n  if (!existingUserObject) {\r\n    const errorObject = new Error(\"User object not found, please reinitialize the session\");\r\n\r\n    const customError = createCustomError(errorObject, 'updateUserSessionAndObject', `User object not found, please reinitialize the session`, ERROR_CODE?.P2_INVALID_SESSION_ID_CLIENTID?.errorCode, ERROR_CODE?.P2_INVALID_SESSION_ID_CLIENTID?.statusCode);\r\n\r\n    Logger.error(errorSerializer(customError));\r\n\r\n    res.status(400).json({\r\n      error: 'User object not found, please reinitialize the session'\r\n    });\r\n    return false;\r\n  }\r\n  const updatedSessions = existingUserObject.sessions.map(s =>\r\n    s.sessionID === sessionID\r\n      ? {\r\n        ...s,\r\n        chatHistory: s.chatHistory.concat(chatHistory),\r\n        ...sessionObject\r\n      }\r\n      : s\r\n  );\r\n  const fullChatHistory = updatedSessions.find(\r\n    s => s.sessionID === sessionID\r\n  )?.chatHistory;\r\n  const updatedUserObject = {\r\n    ...existingUserObject,\r\n    sessions: updatedSessions\r\n  };\r\n  const parsedUserObject = userObject.validateUserObject(updatedUserObject);\r\n  await userObject.updateUserObjectInStore(clientID, parsedUserObject);\r\n  return fullChatHistory;\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "getUserSessionChatHistory",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/route-handlers/chat/index.ts",
+    "startLine": 317,
+    "endLine": 365,
+    "content": "async function getUserSessionChatHistory(clientID, userUUID, sessionID, res) {\r\n  try {\r\n    const existingUserObject = await userObject.getExistingUserObject(\r\n      clientID,\r\n      userUUID\r\n    );\r\n    if (!existingUserObject) {\r\n      const errorObject = new Error(\"User object not found, please reinitialize the session\");\r\n\r\n      const customError = createCustomError(errorObject,\r\n        'getUserSessionChatHistory',\r\n        `Invalid sessionID or clientID detected: sessionID=${sessionID}, clientID=${clientID}`,\r\n        ERROR_CODE?.P2_INVALID_SESSION_ID_CLIENTID?.errorCode,\r\n        ERROR_CODE?.P2_INVALID_SESSION_ID_CLIENTID?.statusCode);\r\n\r\n      Logger.error(errorSerializer(customError));\r\n\r\n    }\r\n    const existingSession = existingUserObject.sessions.find(\r\n      s => s.sessionID === sessionID\r\n    );\r\n    if (!existingSession) {\r\n      const errorObject = new Error(\"Session not found'\");\r\n\r\n      const customError = createCustomError(errorObject,\r\n        'getUserSessionChatHistory',\r\n        `Invalid sessionID or clientID detected: sessionID=${sessionID},\r\n          clientID=${clientID}`, ERROR_CODE?.P2_INVALID_SESSION_ID_CLIENTID?.errorCode,\r\n        ERROR_CODE?.P2_INVALID_SESSION_ID_CLIENTID?.statusCode);\r\n\r\n      Logger.error(errorSerializer(customError));\r\n    }\r\n    return {\r\n      userObject: existingUserObject,\r\n      sessionChatHistory: existingSession?.chatHistory || [],\r\n      summarizedSession: existingSession?.sessionChatSummary || \"\"\r\n    };\r\n\r\n  } catch (error) {\r\n    const errorObject = new Error(\"Error in Session'\");\r\n\r\n    const customError = createCustomError(errorObject, 'getUserSessionChatHistory', `Invalid sessionID or clientID detected: sessionID=${sessionID}, clientID=${clientID}`, ERROR_CODE?.P2_ERROR_UPDATING_USER_OBJECT?.errorCode, ERROR_CODE?.P2_ERROR_UPDATING_USER_OBJECT?.statusCode);\r\n\r\n    Logger.error(errorSerializer(customError));\r\n    return;\r\n\r\n  }\r\n\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "flattenChatHistory",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/route-handlers/chat/index.ts",
+    "startLine": 367,
+    "endLine": 376,
+    "content": "async function flattenChatHistory(chatHistory) {\r\n  return chatHistory.map(message => {\r\n    if (message.type === 'apiMessage') {\r\n      return { role: 'system', content: message.message };\r\n    } else if (message.type === 'userMessage') {\r\n      const userMessage = message.message?.split('###\\n\\n').pop();\r\n      return { role: 'user', content: userMessage };\r\n    }\r\n  });\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "flattenChatHistoryToString",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/route-handlers/chat/index.ts",
+    "startLine": 378,
+    "endLine": 389,
+    "content": "async function flattenChatHistoryToString(chatHistory) {\r\n  return chatHistory\r\n    .map(message => {\r\n      if (message.type === 'apiMessage') {\r\n        return `agent: ${message.message}`;\r\n      } else if (message.type === 'userMessage') {\r\n        const userMessage = message.message?.split('###\\n\\n').pop();\r\n        return `user: ${userMessage}`;\r\n      }\r\n    })\r\n    .join('\\n');\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "mapTopActions",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/route-handlers/chat/index.ts",
+    "startLine": 391,
+    "endLine": 402,
+    "content": "function mapTopActions(response) {\r\n  return {\r\n    top_actions: response.top_actions.map(actionObj => ({\r\n      action: actionMapping[actionObj.action] || actionObj.action,\r\n      probability: actionObj.probability\r\n    })),\r\n    user_category: response.user_category,\r\n    model_name: response.model_name,\r\n    model_year: response.model_year,\r\n    zip_code: response.zip_code\r\n  };\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "generateNextBestActionsV2",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/route-handlers/chat/index.ts",
+    "startLine": 404,
+    "endLine": 469,
+    "content": "async function generateNextBestActionsV2(\r\n  fullChatHistory,\r\n  current_question,\r\n  sessionID, clientId\r\n) {\r\n  const apiUrl = process.env.NEXT_BEST_ACTION_URI + '/api/v1/predict';\r\n\r\n  const requestData = {\r\n    chat_history: fullChatHistory,\r\n    current_question: current_question\r\n  };\r\n\r\n  try {\r\n    const response = await axios.post(apiUrl, requestData, {\r\n      headers: {\r\n        'Content-Type': 'application/json'\r\n      }\r\n    });\r\n\r\n    const { user_category, model_name, model_year, zip_code, top_actions, full_actions } =\r\n      response.data;\r\n\r\n    const formattedFullActions = Array.isArray(full_actions)\r\n      ? full_actions.map(item => {\r\n\r\n        return {\r\n          action: item[0],\r\n          probability: item[1]\r\n        };\r\n      })\r\n      : [];\r\n\r\n    // Prepare chat insight data\r\n\r\n    const chatInsight: any = {};\r\n    if (user_category !== null) chatInsight.user_category = user_category;\r\n    if (Array.isArray(model_name)) chatInsight.model_name = model_name;\r\n    if (Array.isArray(model_year)) chatInsight.model_year = model_year;\r\n    if (zip_code !== null) chatInsight.zip_code = zip_code;\r\n    if (formattedFullActions !== null) chatInsight.full_actions = formattedFullActions;\r\n    Logger.info(`Extracted Chat Insight: ${JSON.stringify(chatInsight)}`);\r\n\r\n    await userObject.addChatInsight(sessionID, chatInsight, clientId);\r\n    Logger.info(`Chat insight updated for sessionID: ${sessionID}`);\r\n\r\n    const mappedResponse = mapTopActions({\r\n      top_actions,\r\n      user_category,\r\n      model_name,\r\n      model_year,\r\n      zip_code,\r\n      full_actions: formattedFullActions\r\n    });\r\n\r\n    return mappedResponse.top_actions.map(a => a.action);\r\n  } catch (error) {\r\n\r\n    const customError = createCustomError(error,\r\n      'generateNextBestActions',\r\n      `Error in next best CTAs: ${error}`,\r\n      ERROR_CODE?.P2_ERROR_IN_NEXT_BEST_ACTION?.errorCode,\r\n      ERROR_CODE?.P2_ERROR_IN_NEXT_BEST_ACTION?.statusCode\r\n    );\r\n    Logger.error(errorSerializer(customError));\r\n  }\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "getDatabaseInstance",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/route-handlers/llm/index.ts",
+    "startLine": 19,
+    "endLine": 28,
+    "content": "async function getDatabaseInstance(): Promise<User | DynamoUser> {\r\n  switch (process.env.DATABASE_TYPE) {\r\n    case \"DYNAMODB\":\r\n      return await DynamoUser.instance;\r\n    case \"MONGODB\":\r\n      return await User.instance;\r\n    default:\r\n      throw new Error(`Unsupported DATABASE_TYPE: ${process.env.DATABASE_TYPE}`);\r\n  }\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "initialize",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/route-handlers/llm/index.ts",
+    "startLine": 31,
+    "endLine": 33,
+    "content": "async function initialize() {\r\n  userObject = await getDatabaseInstance();\r\n}"
+  },
+  {
+    "type": "function",
+    "name": "sendUserActionUpdate",
+    "filePath": "C:/Users/praparma/Desktop/llm-api-gateway/llm-api-gateway/src/route-handlers/llm/index.ts",
+    "startLine": 42,
+    "endLine": 75,
+    "content": "async function sendUserActionUpdate(chatInsight, mappedAction, updatedCost) {\r\n  try {\r\n    const formattedFullActions = Array.isArray(chatInsight.full_actions)\r\n      ? chatInsight.full_actions.map(item => [item.action, item.probability])\r\n      : [];\r\n\r\n    const payload = {\r\n      user_category: chatInsight.user_category,\r\n      model_name: chatInsight.model_name,\r\n      model_year: String(chatInsight.model_year),\r\n      vehicle_types: 'Minivan',\r\n      action: mappedAction,\r\n      cost: updatedCost,\r\n      full_actions: formattedFullActions\r\n\r\n    };\r\n    Logger.info(`Sending API request with data: ${JSON.stringify(payload)}`);\r\n\r\n    const apiUrl = process.env.NEXT_BEST_ACTION_URI + '/api/v1/update';\r\n    const response = await axios.post(apiUrl, payload, {\r\n      headers: { 'Content-Type': 'application/json' }\r\n    });\r\n\r\n    Logger.info(`API Response: ${JSON.stringify(response.data)}`);\r\n\r\n    return response.data;\r\n  } catch (error) {\r\n\r\n    const customError = createCustomError(error, 'sendUserActionUpdate', `Error in sendUserActionUpdate: ${error.message}`, ERROR_CODE?.P1_INITIALIZATION_ERROR?.errorCode, ERROR_CODE?.P1_INITIALIZATION_ERROR?.statusCode);\r\n\r\n    Logger.error(errorSerializer(customError));\r\n\r\n  }\r\n}"
+  }
+]
